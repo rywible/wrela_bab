@@ -23,17 +23,23 @@ import type {
   AtmosphereState,
   QualityPreset,
   TerrainChunkData,
+  TerrainDebugView,
   TreeArchetype,
+  WorldSimulationData,
   WorldSnapshot,
 } from "../../domain/procedural/world";
 
+const SHADOW_CHUNK_RADIUS = 3;
+
 interface ChunkVisuals {
+  chunk: TerrainChunkData;
   terrain: Mesh;
   trunks: AbstractMesh[];
   canopy: AbstractMesh[];
   rocks: AbstractMesh[];
   ferns: AbstractMesh[];
   logs: AbstractMesh[];
+  shadowActive: boolean;
 }
 
 export class BabylonRenderer implements RendererPort {
@@ -48,6 +54,7 @@ export class BabylonRenderer implements RendererPort {
   private readonly archetypes: TreeArchetype[];
   private readonly terrainMaterial: StandardMaterial;
   private readonly skyMaterial: StandardMaterial;
+  private readonly oceanMaterial: StandardMaterial;
   private readonly trunkMaterials: StandardMaterial[] = [];
   private readonly canopyMaterial: StandardMaterial;
   private readonly rockMaterial: StandardMaterial;
@@ -56,6 +63,7 @@ export class BabylonRenderer implements RendererPort {
   private readonly skyGradientWeights: number[] = [];
   private readonly skyMesh: Mesh;
   private readonly sunMesh: Mesh;
+  private readonly oceanMesh: Mesh;
   private readonly trunkSources = new Map<number, Mesh>();
   private readonly canopySource: Mesh;
   private readonly rockSources: Mesh[];
@@ -63,6 +71,9 @@ export class BabylonRenderer implements RendererPort {
   private readonly logSource: Mesh;
   private readonly debugVisuals: AbstractMesh[];
   private readonly chunkVisuals = new Map<string, ChunkVisuals>();
+  private worldSimulation?: WorldSimulationData;
+  private chunkSize = 42;
+  private playerChunkCoord = { x: 0, z: 0 };
   private presentationMode: PresentationMode = "follow";
   private visualDebugMode: VisualDebugMode = "default";
 
@@ -101,27 +112,27 @@ export class BabylonRenderer implements RendererPort {
 
     this.camera = new FreeCamera("camera", new Vector3(0, 8, -10), this.scene);
     this.camera.minZ = 0.1;
-    this.camera.maxZ = 800;
+    this.camera.maxZ = 2_200;
     this.camera.fov = 0.95;
     this.scene.activeCamera = this.camera;
 
     this.sunLight = new DirectionalLight("sun", new Vector3(0.4, -1, 0.3), this.scene);
     this.sunLight.position = new Vector3(-40, 80, -20);
-    this.sunLight.intensity = 2.05;
+    this.sunLight.intensity = 2.5;
 
     this.ambientLight = new HemisphericLight("ambient", new Vector3(0, 1, 0), this.scene);
-    this.ambientLight.intensity = 0.92;
+    this.ambientLight.intensity = 0.72;
     this.ambientLight.groundColor = new Color3(0.18, 0.22, 0.15);
 
     this.shadowGenerator = new ShadowGenerator(1024, this.sunLight);
     this.shadowGenerator.bias = 0.0003;
-    this.shadowGenerator.darkness = 0.35;
+    this.shadowGenerator.darkness = 0.46;
     this.shadowGenerator.usePoissonSampling = true;
 
     this.terrainMaterial = new StandardMaterial("terrainMaterial", this.scene);
     this.terrainMaterial.diffuseColor = Color3.White();
-    this.terrainMaterial.emissiveColor = new Color3(0.2, 0.23, 0.18);
-    this.terrainMaterial.specularColor = new Color3(0.08, 0.08, 0.08);
+    this.terrainMaterial.emissiveColor = new Color3(0.15, 0.17, 0.14);
+    this.terrainMaterial.specularColor = new Color3(0.04, 0.04, 0.04);
     this.terrainMaterial.backFaceCulling = false;
 
     this.skyMaterial = new StandardMaterial("skyMaterial", this.scene);
@@ -131,14 +142,14 @@ export class BabylonRenderer implements RendererPort {
     this.skyMaterial.specularColor = Color3.Black();
 
     this.canopyMaterial = new StandardMaterial("canopyMaterial", this.scene);
-    this.canopyMaterial.diffuseColor = new Color3(0.33, 0.48, 0.28);
-    this.canopyMaterial.emissiveColor = new Color3(0.16, 0.21, 0.12);
-    this.canopyMaterial.specularColor = new Color3(0.04, 0.06, 0.03);
+    this.canopyMaterial.diffuseColor = new Color3(0.36, 0.52, 0.26);
+    this.canopyMaterial.emissiveColor = new Color3(0.12, 0.16, 0.08);
+    this.canopyMaterial.specularColor = new Color3(0.02, 0.03, 0.02);
 
     this.rockMaterial = new StandardMaterial("rockMaterial", this.scene);
-    this.rockMaterial.diffuseColor = new Color3(0.44, 0.44, 0.42);
-    this.rockMaterial.emissiveColor = new Color3(0.14, 0.14, 0.13);
-    this.rockMaterial.specularColor = new Color3(0.06, 0.06, 0.06);
+    this.rockMaterial.diffuseColor = new Color3(0.5, 0.49, 0.45);
+    this.rockMaterial.emissiveColor = new Color3(0.1, 0.1, 0.09);
+    this.rockMaterial.specularColor = new Color3(0.04, 0.04, 0.04);
 
     this.fernMaterial = new StandardMaterial("fernMaterial", this.scene);
     this.fernMaterial.diffuseColor = new Color3(0.26, 0.4, 0.22);
@@ -149,6 +160,12 @@ export class BabylonRenderer implements RendererPort {
     this.logMaterial.diffuseColor = new Color3(0.42, 0.28, 0.17);
     this.logMaterial.emissiveColor = new Color3(0.14, 0.09, 0.07);
     this.logMaterial.specularColor = new Color3(0.05, 0.03, 0.02);
+
+    this.oceanMaterial = new StandardMaterial("oceanMaterial", this.scene);
+    this.oceanMaterial.diffuseColor = new Color3(0.12, 0.28, 0.34);
+    this.oceanMaterial.emissiveColor = new Color3(0.06, 0.16, 0.2);
+    this.oceanMaterial.specularColor = new Color3(0.18, 0.26, 0.3);
+    this.oceanMaterial.alpha = 1;
 
     this.skyMesh = this.createSkyDome();
     this.skyMesh.material = this.skyMaterial;
@@ -163,6 +180,17 @@ export class BabylonRenderer implements RendererPort {
     this.sunMesh.isPickable = false;
     this.sunMesh.renderingGroupId = 2;
 
+    this.oceanMesh = MeshBuilder.CreateGround(
+      "ocean-surface",
+      { width: 1, height: 1, subdivisions: 1 },
+      this.scene,
+    );
+    this.oceanMesh.material = this.oceanMaterial;
+    this.oceanMesh.isPickable = false;
+    this.oceanMesh.receiveShadows = false;
+    this.oceanMesh.isVisible = false;
+    this.oceanMesh.renderingGroupId = 1;
+
     for (const archetype of this.archetypes) {
       this.trunkSources.set(archetype.id, this.buildTrunkSource(archetype));
     }
@@ -172,6 +200,17 @@ export class BabylonRenderer implements RendererPort {
     this.fernSources = [this.buildFernSource(0), this.buildFernSource(1)];
     this.logSource = this.buildLogSource();
     this.debugVisuals = this.buildDebugVisuals();
+  }
+
+  setWorldSimulation(world: WorldSimulationData) {
+    this.worldSimulation = world;
+    this.oceanMesh.position.set(
+      world.config.worldMinX + world.config.worldSizeMeters * 0.5,
+      world.config.seaLevel - 0.18,
+      world.config.worldMinZ + world.config.worldSizeMeters * 0.5,
+    );
+    this.oceanMesh.scaling.set(world.config.worldSizeMeters, 1, world.config.worldSizeMeters);
+    this.oceanMesh.isVisible = false;
   }
 
   async mountChunk(chunk: TerrainChunkData) {
@@ -188,6 +227,7 @@ export class BabylonRenderer implements RendererPort {
     terrain.receiveShadows = true;
     terrain.renderingGroupId = 1;
     terrain.useVertexColors = true;
+    this.applyTerrainColors(terrain, chunk);
 
     const trunks = chunk.treeSpawns.map((tree, index) => {
       const source = this.trunkSources.get(tree.archetypeId)!;
@@ -195,7 +235,6 @@ export class BabylonRenderer implements RendererPort {
       instance.position.set(tree.x, tree.y, tree.z);
       instance.scaling.set(tree.scale, tree.scale, tree.scale);
       instance.rotation.y = tree.yaw;
-      this.shadowGenerator.addShadowCaster(instance);
       return instance;
     });
 
@@ -220,7 +259,6 @@ export class BabylonRenderer implements RendererPort {
         const clusterScale = tree.scale * lerp(0.7, 1.15, (clusterIndex % 3) / 2);
         instance.scaling.set(clusterScale, clusterScale * 0.78, clusterScale);
         instance.rotation.y = angle * 0.6;
-        this.shadowGenerator.addShadowCaster(instance);
         clusters.push(instance);
       }
 
@@ -233,7 +271,6 @@ export class BabylonRenderer implements RendererPort {
       instance.position.set(rock.x, rock.y, rock.z);
       instance.scaling.set(rock.scale, rock.scale * 0.82, rock.scale);
       instance.rotation.y = rock.yaw;
-      this.shadowGenerator.addShadowCaster(instance);
       return instance;
     });
 
@@ -252,22 +289,25 @@ export class BabylonRenderer implements RendererPort {
       instance.scaling.set(log.length, log.radius * 2.2, log.radius * 2.2);
       instance.rotation.y = log.yaw;
       instance.rotation.z = log.pitch;
-      this.shadowGenerator.addShadowCaster(instance);
       return instance;
     });
 
-    this.chunkVisuals.set(chunk.id, {
+    const shouldShadow = this.isChunkInShadowRange(chunk.coord);
+    const visuals: ChunkVisuals = {
+      chunk,
       terrain,
       trunks,
       canopy,
       rocks,
       ferns,
       logs,
-    });
-  }
-
-  async updateChunk(chunk: TerrainChunkData) {
-    await this.mountChunk(chunk);
+      shadowActive: false,
+    };
+    this.chunkVisuals.set(chunk.id, visuals);
+    if (shouldShadow) {
+      this.addChunkShadowCasters(visuals);
+    }
+    this.applySceneVisibility(visuals);
   }
 
   unmountChunk(chunkId: string) {
@@ -276,6 +316,9 @@ export class BabylonRenderer implements RendererPort {
       return;
     }
 
+    if (visuals.shadowActive) {
+      this.removeChunkShadowCasters(visuals);
+    }
     visuals.terrain.dispose();
     visuals.trunks.forEach((mesh) => mesh.dispose());
     visuals.canopy.forEach((mesh) => mesh.dispose());
@@ -304,9 +347,21 @@ export class BabylonRenderer implements RendererPort {
       state.skyTop[1] * 0.82,
       state.skyTop[2] * 0.82,
     );
+    this.oceanMaterial.diffuseColor = new Color3(
+      state.fogColor[0] * 0.56,
+      state.horizon[1] * 0.66,
+      state.skyTop[2] * 0.58,
+    );
+    this.oceanMaterial.emissiveColor = new Color3(
+      state.ground[0] * 0.54,
+      state.fogColor[1] * 0.48,
+      state.skyTop[2] * 0.34,
+    );
     this.scene.clearColor = new Color4(state.horizon[0], state.horizon[1], state.horizon[2], 1);
     this.scene.fogColor = new Color3(state.fogColor[0], state.fogColor[1], state.fogColor[2]);
-    this.scene.fogDensity = this.visualDebugMode === "flat" ? 0 : state.fogDensity;
+    const scenicFogScale = this.presentationMode === "follow" ? 1 : 0.35;
+    this.scene.fogDensity =
+      this.visualDebugMode === "default" ? state.fogDensity * scenicFogScale : 0;
 
     this.sunLight.direction = new Vector3(...state.sunDirection);
     this.sunLight.diffuse = new Color3(state.sunColor[0], state.sunColor[1], state.sunColor[2]);
@@ -339,52 +394,86 @@ export class BabylonRenderer implements RendererPort {
 
   setVisualDebugMode(mode: VisualDebugMode) {
     const flat = mode === "flat";
+    const fieldMode = isTerrainDebugView(mode);
+    const debugLighting = mode !== "default";
     this.visualDebugMode = mode;
-    this.skyMesh.isVisible = !flat;
-    this.sunMesh.isVisible = !flat;
+    this.skyMesh.isVisible = !debugLighting;
+    this.sunMesh.isVisible = !debugLighting;
+    this.oceanMesh.isVisible = false;
 
-    this.terrainMaterial.disableLighting = flat;
-    this.terrainMaterial.emissiveColor = flat
-      ? new Color3(0.32, 0.44, 0.24)
+    this.terrainMaterial.disableLighting = debugLighting;
+    this.terrainMaterial.emissiveColor = debugLighting
+      ? fieldMode
+        ? new Color3(0.7, 0.7, 0.7)
+        : new Color3(0.32, 0.44, 0.24)
       : new Color3(0.2, 0.23, 0.18);
 
-    this.canopyMaterial.disableLighting = flat;
-    this.canopyMaterial.emissiveColor = flat
+    this.canopyMaterial.disableLighting = debugLighting;
+    this.canopyMaterial.emissiveColor = debugLighting
       ? new Color3(0.18, 0.38, 0.12)
       : new Color3(0.16, 0.21, 0.12);
 
-    this.rockMaterial.disableLighting = flat;
-    this.rockMaterial.emissiveColor = flat
+    this.rockMaterial.disableLighting = debugLighting;
+    this.rockMaterial.emissiveColor = debugLighting
       ? new Color3(0.38, 0.38, 0.4)
       : new Color3(0.14, 0.14, 0.13);
 
-    this.fernMaterial.disableLighting = flat;
-    this.fernMaterial.emissiveColor = flat
+    this.fernMaterial.disableLighting = debugLighting;
+    this.fernMaterial.emissiveColor = debugLighting
       ? new Color3(0.2, 0.42, 0.16)
       : new Color3(0.14, 0.2, 0.12);
 
-    this.logMaterial.disableLighting = flat;
-    this.logMaterial.emissiveColor = flat
+    this.logMaterial.disableLighting = debugLighting;
+    this.logMaterial.emissiveColor = debugLighting
       ? new Color3(0.38, 0.21, 0.14)
       : new Color3(0.14, 0.09, 0.07);
 
     for (const material of this.trunkMaterials) {
-      material.disableLighting = flat;
-      material.emissiveColor = flat ? new Color3(0.46, 0.26, 0.18) : new Color3(0.11, 0.07, 0.05);
+      material.disableLighting = debugLighting;
+      material.emissiveColor = debugLighting
+        ? new Color3(0.46, 0.26, 0.18)
+        : new Color3(0.11, 0.07, 0.05);
     }
 
     for (const mesh of this.debugVisuals) {
       mesh.isVisible = flat;
     }
+
+    for (const visuals of this.chunkVisuals.values()) {
+      this.applyTerrainColors(visuals.terrain, visuals.chunk);
+      this.applySceneVisibility(visuals);
+    }
   }
 
   setPlayerPose(pose: { x: number; y: number; z: number; yaw: number; mode: "walk" | "fly" }) {
-    if (this.presentationMode === "overview") {
-      this.camera.position.set(-14, 42, -34);
-      this.camera.setTarget(new Vector3(19, 19, 19));
+    const newChunkX = Math.floor(pose.x / this.chunkSize);
+    const newChunkZ = Math.floor(pose.z / this.chunkSize);
+    if (newChunkX !== this.playerChunkCoord.x || newChunkZ !== this.playerChunkCoord.z) {
+      this.playerChunkCoord = { x: newChunkX, z: newChunkZ };
+      this.refreshShadowCasters();
+    }
+
+    if (this.presentationMode !== "follow") {
+      this.camera.fov = 0.68;
+      const bookmark = this.worldSimulation?.viewpoints[this.presentationMode];
+      if (bookmark) {
+        this.camera.position.set(bookmark.position[0], bookmark.position[1], bookmark.position[2]);
+        this.camera.setTarget(
+          new Vector3(bookmark.target[0], bookmark.target[1], bookmark.target[2]),
+        );
+        return;
+      }
+
+      if (this.presentationMode === "overview") {
+        this.camera.position.set(-14, 42, -34);
+        this.camera.setTarget(new Vector3(19, 19, 19));
+        return;
+      }
+
       return;
     }
 
+    this.camera.fov = 0.95;
     const dirX = Math.sin(pose.yaw);
     const dirZ = Math.cos(pose.yaw);
     const followDistance = pose.mode === "walk" ? 8.5 : 11.5;
@@ -409,6 +498,7 @@ export class BabylonRenderer implements RendererPort {
     this.runtimeLabel.textContent = snapshot.status;
     this.hud.textContent = [
       `mode: ${snapshot.player.mode}`,
+      `visual: ${this.visualDebugMode}`,
       `chunk: ${snapshot.player.currentChunk.x}, ${snapshot.player.currentChunk.z}`,
       `player: ${snapshot.player.x.toFixed(1)}, ${snapshot.player.y.toFixed(1)}, ${snapshot.player.z.toFixed(1)}`,
       `chunks: ${snapshot.world.loadedChunks}`,
@@ -416,6 +506,9 @@ export class BabylonRenderer implements RendererPort {
       `rocks: ${snapshot.world.rocks}`,
       `ferns: ${snapshot.world.ferns}`,
       `logs: ${snapshot.world.logs}`,
+      `watersheds: ${snapshot.world.simulation.watersheds}`,
+      `streams: ${(snapshot.world.simulation.streamCoverage * 100).toFixed(1)}%`,
+      `suitability: ${snapshot.world.simulation.suitabilityMean.toFixed(2)} / ${snapshot.world.simulation.suitabilityMax.toFixed(2)}`,
       `meshes: ${this.scene.meshes.length}`,
       `active: ${activeMeshes}`,
       `fog: ${snapshot.atmosphere.fogDensity.toFixed(4)}`,
@@ -523,8 +616,47 @@ export class BabylonRenderer implements RendererPort {
     this.debugVisuals.forEach((mesh) => mesh.dispose());
     this.skyMesh.dispose();
     this.sunMesh.dispose();
+    this.oceanMesh.dispose();
     this.scene.dispose();
     this.engine.dispose();
+  }
+
+  private isChunkInShadowRange(coord: { x: number; z: number }) {
+    return (
+      Math.max(
+        Math.abs(coord.x - this.playerChunkCoord.x),
+        Math.abs(coord.z - this.playerChunkCoord.z),
+      ) <= SHADOW_CHUNK_RADIUS
+    );
+  }
+
+  private addChunkShadowCasters(visuals: ChunkVisuals) {
+    if (visuals.shadowActive) return;
+    visuals.shadowActive = true;
+    for (const mesh of visuals.trunks) this.shadowGenerator.addShadowCaster(mesh);
+    for (const mesh of visuals.canopy) this.shadowGenerator.addShadowCaster(mesh);
+    for (const mesh of visuals.rocks) this.shadowGenerator.addShadowCaster(mesh);
+    for (const mesh of visuals.logs) this.shadowGenerator.addShadowCaster(mesh);
+  }
+
+  private removeChunkShadowCasters(visuals: ChunkVisuals) {
+    if (!visuals.shadowActive) return;
+    visuals.shadowActive = false;
+    for (const mesh of visuals.trunks) this.shadowGenerator.removeShadowCaster(mesh);
+    for (const mesh of visuals.canopy) this.shadowGenerator.removeShadowCaster(mesh);
+    for (const mesh of visuals.rocks) this.shadowGenerator.removeShadowCaster(mesh);
+    for (const mesh of visuals.logs) this.shadowGenerator.removeShadowCaster(mesh);
+  }
+
+  private refreshShadowCasters() {
+    for (const visuals of this.chunkVisuals.values()) {
+      const inRange = this.isChunkInShadowRange(visuals.chunk.coord);
+      if (inRange && !visuals.shadowActive) {
+        this.addChunkShadowCasters(visuals);
+      } else if (!inRange && visuals.shadowActive) {
+        this.removeChunkShadowCasters(visuals);
+      }
+    }
   }
 
   private createSkyDome() {
@@ -708,6 +840,34 @@ export class BabylonRenderer implements RendererPort {
     return log;
   }
 
+  private applyTerrainColors(terrain: Mesh, chunk: TerrainChunkData) {
+    const colors = isTerrainDebugView(this.visualDebugMode)
+      ? chunk.debugColors[this.visualDebugMode]
+      : chunk.colors;
+    terrain.updateVerticesData(VertexBuffer.ColorKind, colors);
+    terrain.useVertexColors = true;
+  }
+
+  private applySceneVisibility(visuals: ChunkVisuals) {
+    const fieldMode = isTerrainDebugView(this.visualDebugMode);
+    const scatterVisible = !fieldMode;
+    for (const mesh of visuals.trunks) {
+      mesh.isVisible = scatterVisible;
+    }
+    for (const mesh of visuals.canopy) {
+      mesh.isVisible = scatterVisible;
+    }
+    for (const mesh of visuals.rocks) {
+      mesh.isVisible = scatterVisible;
+    }
+    for (const mesh of visuals.ferns) {
+      mesh.isVisible = scatterVisible;
+    }
+    for (const mesh of visuals.logs) {
+      mesh.isVisible = scatterVisible;
+    }
+  }
+
   private buildDebugVisuals() {
     const visuals: AbstractMesh[] = [];
 
@@ -767,4 +927,14 @@ function mixColor(a: [number, number, number], b: [number, number, number], t: n
 
 function clamp01(value: number) {
   return Math.min(1, Math.max(0, value));
+}
+
+function isTerrainDebugView(mode: VisualDebugMode): mode is TerrainDebugView {
+  return (
+    mode === "coastDistance" ||
+    mode === "flowAccumulation" ||
+    mode === "floodplain" ||
+    mode === "fogExposure" ||
+    mode === "redwoodSuitability"
+  );
 }

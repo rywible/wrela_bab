@@ -10,6 +10,14 @@ const ROOT = path.resolve(__dirname, "..");
 const HOST = "127.0.0.1";
 const OUTPUT_DIR = path.resolve(ROOT, "output/playwright");
 const HEADED = process.argv.includes("--headed");
+const CAPTURES = [
+  { presentationMode: "overview", visualMode: "default" },
+  { presentationMode: "grove", visualMode: "default" },
+  { presentationMode: "valley", visualMode: "default" },
+  { presentationMode: "ridge", visualMode: "default" },
+  { presentationMode: "valley", visualMode: "floodplain" },
+  { presentationMode: "valley", visualMode: "redwoodSuitability" },
+];
 
 function vpCommand() {
   return process.platform === "win32" ? "vp.cmd" : "vp";
@@ -118,35 +126,41 @@ async function main() {
       args: ["--enable-unsafe-webgpu", "--disable-dawn-features=disallow_unsafe_apis"],
     });
 
-    for (const visualMode of ["default", "flat"]) {
-      const page = await browser.newPage({
-        viewport: { width: 1360, height: 920 },
-        colorScheme: "dark",
-      });
-      const consoleMessages = [];
-      const pageErrors = [];
+    const page = await browser.newPage({
+      viewport: { width: 1360, height: 920 },
+      colorScheme: "dark",
+    });
+    const consoleMessages = [];
+    const pageErrors = [];
 
-      page.on("console", (message) => {
-        consoleMessages.push({
-          type: message.type(),
-          text: message.text(),
-        });
+    page.on("console", (message) => {
+      consoleMessages.push({
+        type: message.type(),
+        text: message.text(),
       });
-      page.on("pageerror", (error) => {
-        pageErrors.push({
-          name: error.name,
-          message: error.message,
-        });
+    });
+    page.on("pageerror", (error) => {
+      pageErrors.push({
+        name: error.name,
+        message: error.message,
       });
+    });
 
-      const captureUrl = `http://${HOST}:${port}/?capture=1&visual=${visualMode}`;
-      await page.goto(captureUrl, { waitUntil: "networkidle" });
-      await page.locator('#renderCanvas[data-ready="1"]').waitFor({ timeout: 15_000 });
-      await page.waitForTimeout(250);
-      await page.evaluate(() => {
-        window.advanceTime?.(750);
-      });
-      await page.waitForTimeout(100);
+    await page.goto(`http://${HOST}:${port}/?capture=1`, { waitUntil: "networkidle" });
+    await page.locator('#renderCanvas[data-ready="1"]').waitFor({ timeout: 15_000 });
+    await page.waitForTimeout(250);
+    await page.evaluate(() => {
+      window.advanceTime?.(750);
+    });
+    await page.waitForTimeout(100);
+
+    for (const capture of CAPTURES) {
+      await page.evaluate(({ presentationMode, visualMode }) => {
+        window.__wrelaDebug?.setPresentationMode(presentationMode);
+        window.__wrelaDebug?.setVisualMode(visualMode);
+        window.advanceTime?.(450);
+      }, capture);
+      await page.waitForTimeout(120);
 
       const snapshot = await page.evaluate(() => {
         const renderText = window.render_game_to_text?.() ?? "{}";
@@ -162,20 +176,23 @@ async function main() {
       });
       snapshot.consoleMessages = consoleMessages;
       snapshot.pageErrors = pageErrors;
+
+      const prefix = `${capture.presentationMode}-${capture.visualMode}`;
       await page.locator("#renderCanvas").screenshot({
-        path: path.join(OUTPUT_DIR, `${visualMode}-frame.png`),
+        path: path.join(OUTPUT_DIR, `${prefix}-frame.png`),
       });
       await page.screenshot({
-        path: path.join(OUTPUT_DIR, `${visualMode}-page.png`),
+        path: path.join(OUTPUT_DIR, `${prefix}-page.png`),
         fullPage: true,
       });
       await writeFile(
-        path.join(OUTPUT_DIR, `${visualMode}-state.json`),
+        path.join(OUTPUT_DIR, `${prefix}-state.json`),
         JSON.stringify(snapshot, null, 2),
         "utf8",
       );
-      await page.close();
     }
+
+    await page.close();
 
     console.log(`Visual validation capture saved to ${OUTPUT_DIR}`);
   } finally {

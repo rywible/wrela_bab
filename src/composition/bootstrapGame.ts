@@ -1,6 +1,7 @@
 import type { ChunkRepository } from "../application/contracts";
 import type { TerrainChunkData } from "../domain/procedural/world";
 import { GameApp } from "../application/GameApp";
+import type { VisualDebugMode } from "../application/contracts";
 import { buildRedwoodArchetypes } from "../domain/procedural/world";
 import { BabylonRenderer } from "../infrastructure/babylon/BabylonRenderer";
 import { BrowserInputState } from "../infrastructure/input/BrowserInputState";
@@ -12,7 +13,7 @@ const CHUNK_SIZE = 42;
 
 interface BootstrapOptions {
   captureMode?: boolean;
-  visualDebugMode?: "default" | "flat";
+  visualDebugMode?: VisualDebugMode;
 }
 
 export async function bootstrapGame(canvas: HTMLCanvasElement, options: BootstrapOptions = {}) {
@@ -46,7 +47,7 @@ export async function bootstrapGame(canvas: HTMLCanvasElement, options: Bootstra
     chunkSize: CHUNK_SIZE,
     qualityPreset: "laptop",
     freezeTime: options.captureMode,
-    presentationMode: options.captureMode ? "overview" : "follow",
+    presentationMode: options.captureMode ? "valley" : "follow",
     visualDebugMode: options.visualDebugMode ?? "default",
   });
 

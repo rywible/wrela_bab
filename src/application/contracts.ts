@@ -4,11 +4,19 @@ import type {
   ChunkRequest,
   QualityPreset,
   TerrainChunkData,
+  WorldSimulationData,
   WorldSnapshot,
 } from "../domain/procedural/world";
 
-export type PresentationMode = "follow" | "overview";
-export type VisualDebugMode = "default" | "flat";
+export type PresentationMode = "follow" | "overview" | "grove" | "valley" | "ridge";
+export type VisualDebugMode =
+  | "default"
+  | "flat"
+  | "coastDistance"
+  | "flowAccumulation"
+  | "floodplain"
+  | "fogExposure"
+  | "redwoodSuitability";
 
 export interface RendererDebugStats {
   presentationMode: PresentationMode;
@@ -26,9 +34,9 @@ export interface RendererDebugStats {
 
 export interface RendererPort {
   mountChunk(chunk: TerrainChunkData): Promise<void>;
-  updateChunk(chunk: TerrainChunkData): Promise<void>;
   unmountChunk(chunkId: string): void;
   setAtmosphereState(state: AtmosphereState): void;
+  setWorldSimulation(world: WorldSimulationData): void;
   setQualityPreset(preset: QualityPreset): void;
   setPresentationMode(mode: PresentationMode): void;
   setVisualDebugMode(mode: VisualDebugMode): void;
@@ -42,6 +50,7 @@ export interface RendererPort {
 }
 
 export interface ChunkGenerationQueue {
+  initialize(world: WorldSimulationData): Promise<WorldSimulationData>;
   request(request: ChunkRequest): Promise<TerrainChunkData>;
   dispose(): void;
 }

@@ -4,15 +4,18 @@ import type {
   PlayerSnapshot,
   QualityPreset,
   TerrainChunkData,
+  WorldSimulationData,
   WorldSeed,
   WorldSnapshot,
 } from "../domain/procedural/world";
 import {
   chunkCoordFromPosition,
+  createDefaultWorldLayoutConfig,
   createAtmosphereState,
+  createWorldSimulationData,
   createWorldSnapshot,
+  getSurfaceHeight,
   makeChunkId,
-  sampleTerrain,
   terrainResolutionForLod,
 } from "../domain/procedural/world";
 import type {
@@ -31,6 +34,7 @@ const WALK_SPEED = 7.5;
 const FLY_SPEED = 12;
 const TURN_SPEED = 1.9;
 const CHUNK_RING = 2;
+const SCENIC_CHUNK_RING = 8;
 
 interface GameAppOptions {
   renderer: RendererPort;
@@ -80,6 +84,7 @@ export class GameApp {
   private readonly mountedChunks = new Map<string, TerrainChunkData>();
   private readonly inflightChunks = new Map<string, Promise<TerrainChunkData>>();
   private readonly desiredChunkIds = new Set<string>();
+  private worldSimulation?: WorldSimulationData;
   private player: PlayerState = {
     x: 0,
     y: 6,
@@ -99,6 +104,7 @@ export class GameApp {
   private accumulator = 0;
   private animationFrame = 0;
   private disposed = false;
+  private chunkGeneration = 0;
   private presentationMode: PresentationMode;
 
   constructor(options: GameAppOptions) {
@@ -118,9 +124,18 @@ export class GameApp {
     this.renderer.setQualityPreset(this.qualityPreset);
     this.renderer.setPresentationMode(this.presentationMode);
     this.renderer.setVisualDebugMode(this.visualDebugMode);
+    this.runtime.status = "simulating routed coastal watersheds";
+    this.worldSimulation = createWorldSimulationData(
+      this.worldSeed,
+      createDefaultWorldLayoutConfig(this.worldSeed),
+    );
+    this.applySpawnLocation();
+    this.alignPlayerToPresentationMode();
+    this.worldSimulation = await this.queue.initialize(this.worldSimulation);
+    this.renderer.setWorldSimulation(this.worldSimulation);
     await this.ensureDesiredChunks();
     this.syncPlayerToTerrain();
-    this.runtime.status = "running redwood biome slice";
+    this.runtime.status = "running watershed-shaped redwood landscape";
     this.pushRuntime();
     this.animationFrame = window.requestAnimationFrame(this.onAnimationFrame);
   }
@@ -162,7 +177,9 @@ export class GameApp {
   setPresentationMode(mode: PresentationMode) {
     this.presentationMode = mode;
     this.renderer.setPresentationMode(mode);
+    this.alignPlayerToPresentationMode();
     this.renderer.setPlayerPose(this.player);
+    void this.ensureDesiredChunks();
     this.renderer.render();
     this.pushRuntime();
   }
@@ -228,13 +245,7 @@ export class GameApp {
     }
 
     if (this.input.consumePressed("reset")) {
-      this.player = {
-        x: 0,
-        y: 6,
-        z: 0,
-        yaw: Math.PI * 0.25,
-        mode: "walk",
-      };
+      this.applySpawnLocation();
       this.syncPlayerToTerrain();
       this.runtime.status = "player reset in redwood biome slice";
     }
@@ -258,7 +269,7 @@ export class GameApp {
       const resolved = this.resolveHorizontalCollisions(nextX, nextZ);
       this.player.x = resolved.x;
       this.player.z = resolved.z;
-      this.player.y = sampleTerrain(this.worldSeed, this.player.x, this.player.z).height + 1.85;
+      this.player.y = this.getPlayerGroundHeight(this.player.x, this.player.z) + 1.85;
       return;
     }
 
@@ -270,7 +281,7 @@ export class GameApp {
       0.65 *
       deltaSeconds;
     this.player.y = Math.max(
-      sampleTerrain(this.worldSeed, this.player.x, this.player.z).height + 1.2,
+      this.getPlayerGroundHeight(this.player.x, this.player.z) + 1.2,
       this.player.y,
     );
   }
@@ -297,17 +308,44 @@ export class GameApp {
   }
 
   private syncPlayerToTerrain() {
-    this.player.y = sampleTerrain(this.worldSeed, this.player.x, this.player.z).height + 1.85;
+    this.player.y = this.getPlayerGroundHeight(this.player.x, this.player.z) + 1.85;
+  }
+
+  private applySpawnLocation() {
+    const world = this.requireWorldSimulation();
+    this.player = {
+      x: world.spawn.x,
+      y: world.spawn.y + 1.85,
+      z: world.spawn.z,
+      yaw: world.spawn.yaw,
+      mode: "walk",
+    };
+  }
+
+  private alignPlayerToPresentationMode() {
+    if (this.presentationMode === "follow") {
+      return;
+    }
+
+    const bookmark = this.requireWorldSimulation().viewpoints[this.presentationMode];
+    if (!bookmark) {
+      return;
+    }
+
+    this.player.x = bookmark.target[0];
+    this.player.z = bookmark.target[2];
+    this.player.y = this.getPlayerGroundHeight(this.player.x, this.player.z) + 1.85;
   }
 
   private async ensureDesiredChunks() {
+    const generation = ++this.chunkGeneration;
     const desired = planDesiredChunks(
       {
         x: this.player.x,
         z: this.player.z,
       },
       this.chunkSize,
-      CHUNK_RING,
+      this.presentationMode === "follow" ? CHUNK_RING : SCENIC_CHUNK_RING,
     );
 
     this.desiredChunkIds.clear();
@@ -316,6 +354,10 @@ export class GameApp {
     }
 
     await Promise.all(desired.map((entry) => this.ensureChunk(entry)));
+
+    if (generation !== this.chunkGeneration) {
+      return;
+    }
 
     for (const [chunkId] of this.mountedChunks) {
       if (!this.desiredChunkIds.has(chunkId)) {
@@ -392,6 +434,7 @@ export class GameApp {
       runtime: this.runtime,
       mode: "running",
       status: this.runtime.status,
+      simulation: this.requireWorldSimulation().summary,
     });
   }
 
@@ -416,6 +459,18 @@ export class GameApp {
       trees: snapshot.world.trees,
     };
   }
+
+  private requireWorldSimulation() {
+    if (!this.worldSimulation) {
+      throw new Error("World simulation has not been initialized.");
+    }
+
+    return this.worldSimulation;
+  }
+
+  private getPlayerGroundHeight(x: number, z: number) {
+    return getSurfaceHeight(this.requireWorldSimulation(), x, z);
+  }
 }
 
 export function planDesiredChunks(
@@ -436,7 +491,12 @@ export function planDesiredChunks(
     }
   }
 
-  return desired.sort((a, b) => a.lod - b.lod);
+  return desired.sort((a, b) => {
+    if (a.lod !== b.lod) return a.lod - b.lod;
+    const aDist = Math.max(Math.abs(a.coord.x - center.x), Math.abs(a.coord.z - center.z));
+    const bDist = Math.max(Math.abs(b.coord.x - center.x), Math.abs(b.coord.z - center.z));
+    return aDist - bDist;
+  });
 }
 
 function round(value: number) {

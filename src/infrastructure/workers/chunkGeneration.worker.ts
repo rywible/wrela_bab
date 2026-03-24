@@ -1,12 +1,27 @@
 /// <reference lib="webworker" />
 
-import type { ChunkRequest, TerrainChunkData } from "../../domain/procedural/world";
+import type {
+  ChunkRequest,
+  TerrainChunkData,
+  WorldSimulationData,
+} from "../../domain/procedural/world";
 import { buildChunk } from "../../domain/procedural/world";
+
+interface WorldInitializeMessage {
+  type: "initialize-world";
+  requestId: number;
+  world: WorldSimulationData;
+}
 
 interface ChunkBuildRequestMessage {
   type: "build-chunk";
   requestId: number;
   request: ChunkRequest;
+}
+
+interface WorldReadyMessage {
+  type: "world-ready";
+  requestId: number;
 }
 
 interface ChunkBuildResponseMessage {
@@ -17,16 +32,31 @@ interface ChunkBuildResponseMessage {
 
 declare const self: DedicatedWorkerGlobalScope;
 
-self.addEventListener("message", (event: MessageEvent<ChunkBuildRequestMessage>) => {
-  if (event.data.type !== "build-chunk") {
-    return;
-  }
+let worldSimulation: WorldSimulationData | undefined;
 
-  const chunk = buildChunk(event.data.request);
-  const response: ChunkBuildResponseMessage = {
-    type: "built-chunk",
-    requestId: event.data.requestId,
-    chunk,
-  };
-  self.postMessage(response);
-});
+self.addEventListener(
+  "message",
+  (event: MessageEvent<WorldInitializeMessage | ChunkBuildRequestMessage>) => {
+    if (event.data.type === "initialize-world") {
+      worldSimulation = event.data.world;
+      const response: WorldReadyMessage = {
+        type: "world-ready",
+        requestId: event.data.requestId,
+      };
+      self.postMessage(response);
+      return;
+    }
+
+    if (!worldSimulation) {
+      throw new Error("Chunk generation requested before world initialization.");
+    }
+
+    const chunk = buildChunk(worldSimulation, event.data.request);
+    const response: ChunkBuildResponseMessage = {
+      type: "built-chunk",
+      requestId: event.data.requestId,
+      chunk,
+    };
+    self.postMessage(response);
+  },
+);

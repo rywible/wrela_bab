@@ -1,4 +1,5 @@
 import "./style.css";
+import type { VisualDebugMode } from "./application/contracts";
 import { bootstrapGame } from "./composition/bootstrapGame";
 
 declare global {
@@ -9,8 +10,8 @@ declare global {
     __wrelaMetrics?: Record<string, unknown>;
     __wrelaDebug?: {
       captureMode: boolean;
-      setPresentationMode: (mode: "follow" | "overview") => void;
-      setVisualMode: (mode: "default" | "flat") => void;
+      setPresentationMode: (mode: "follow" | "overview" | "grove" | "valley" | "ridge") => void;
+      setVisualMode: (mode: VisualDebugMode) => void;
       getSceneStats: () => unknown;
       captureScene: (size?: { width: number; height: number }) => Promise<string>;
     };
@@ -43,7 +44,19 @@ const canvas = app.querySelector<HTMLCanvasElement>(".render-canvas");
 const runtimeLabel = app.querySelector<HTMLElement>("[data-role='runtime']");
 const urlParams = new URLSearchParams(window.location.search);
 const captureMode = urlParams.get("capture") === "1" || urlParams.get("capture") === "true";
-const visualDebugMode = urlParams.get("visual") === "flat" ? "flat" : "default";
+const requestedVisualMode = urlParams.get("visual");
+const visualModes = new Set<VisualDebugMode>([
+  "default",
+  "flat",
+  "coastDistance",
+  "flowAccumulation",
+  "floodplain",
+  "fogExposure",
+  "redwoodSuitability",
+]);
+const visualDebugMode: VisualDebugMode = visualModes.has(requestedVisualMode as VisualDebugMode)
+  ? (requestedVisualMode as VisualDebugMode)
+  : "default";
 
 if (captureMode) {
   document.body.dataset.captureMode = "1";

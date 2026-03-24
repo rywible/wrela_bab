@@ -47,3 +47,34 @@ Original prompt: PLEASE IMPLEMENT THIS PLAN:
 
 - Current operating note:
   - visual debugging is now reliable enough to use as the default loop for further biome work; the next work should focus on scene quality, density, and rendering polish rather than capture infrastructure.
+
+- Completed research-backed geography refactor:
+  - replaced the macro terrain pass with a watershed-first simulation in `src/domain/procedural/worldSimulation.ts`
+  - added routed coarse-grid fields for channel width, floodplain, northness, shoulderness, and salt exposure
+  - added deterministic spawn selection plus scenic shoreline/valley/ridge bookmarks
+  - retuned placement and hero-grove injection so the spawn chunk follows the new fog-belt watershed instead of the old origin chunk
+  - updated visual validation to capture shoreline, valley, ridge, and field overlays in both browser and Electron
+
+- Latest validation status after geography refactor:
+  - `vp check` passes
+  - `vp test` passes with added spawn and routed-drainage tests
+  - `vp run visual:validate` passes with the new bookmark workflow
+  - `vp run visual:validate:electron` passes with the same bookmark workflow
+
+- Remaining visual note:
+  - the structural watershed refactor is in place, but the screenshots still read flatter than desired; the next pass should focus on stronger macro relief/art direction rather than more infrastructure changes
+
+- Artistic tuning pass started:
+  - strengthened macro ridges, inland rise, coastal bluffing, ravine accents, and scenic bookmark framing
+  - next step is fresh visual QA on shoreline/valley/ridge captures
+
+- Artistic tuning iteration:
+  - amplified macro relief substantially; current macro height range now reaches ~767 m
+  - widened scenic streaming ring to 10 and narrowed scenic FOV for longer views
+  - retuned bookmarks to score on broad relief and shoulder/stream structure instead of flat cells
+  - increased redwood suitability and tree density to restore forest presence after relief scaling
+
+- Forest-only terrain pass:
+  - replaced shoreline scenic view with grove view and removed visible ocean from validation/runtime framing
+  - repurposed scenic capture loop to overview/grove/valley/ridge plus inland debug overlays
+  - added extra grove hummocks and shoulder ribs so interior terrain reads under dense canopy

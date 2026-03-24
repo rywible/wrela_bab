@@ -12,6 +12,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const HOST = "127.0.0.1";
 const OUTPUT_DIR = path.resolve(ROOT, "output/playwright");
+const CAPTURES = [
+  { presentationMode: "overview", visualMode: "default" },
+  { presentationMode: "grove", visualMode: "default" },
+  { presentationMode: "valley", visualMode: "default" },
+  { presentationMode: "ridge", visualMode: "default" },
+  { presentationMode: "valley", visualMode: "floodplain" },
+  { presentationMode: "valley", visualMode: "redwoodSuitability" },
+];
 
 function vpCommand() {
   return process.platform === "win32" ? "vp.cmd" : "vp";
@@ -112,11 +120,14 @@ async function main() {
   try {
     await waitForPort(HOST, port, 30_000);
 
-    for (const visualMode of ["default", "flat"]) {
+    for (const capture of CAPTURES) {
+      const prefix = `${capture.presentationMode}-${capture.visualMode}`;
       await runCommand(electronBinary, [path.resolve(ROOT, "electron/capture.cjs")], {
-        ELECTRON_START_URL: `http://${HOST}:${port}/?capture=1&visual=${visualMode}`,
-        ELECTRON_CAPTURE_OUTPUT_PNG: path.join(OUTPUT_DIR, `${visualMode}-electron-window.png`),
-        ELECTRON_CAPTURE_OUTPUT_JSON: path.join(OUTPUT_DIR, `${visualMode}-electron-state.json`),
+        ELECTRON_START_URL: `http://${HOST}:${port}/?capture=1`,
+        ELECTRON_CAPTURE_PRESENTATION_MODE: capture.presentationMode,
+        ELECTRON_CAPTURE_VISUAL_MODE: capture.visualMode,
+        ELECTRON_CAPTURE_OUTPUT_PNG: path.join(OUTPUT_DIR, `${prefix}-electron-window.png`),
+        ELECTRON_CAPTURE_OUTPUT_JSON: path.join(OUTPUT_DIR, `${prefix}-electron-state.json`),
       });
     }
 
