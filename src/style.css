@@ -1,0 +1,136 @@
+:root {
+  color: #eef3e8;
+  background: #091118;
+  font:
+    16px/1.45 "Avenir Next",
+    "Segoe UI Variable",
+    "Trebuchet MS",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100svh;
+}
+
+body {
+  overflow: hidden;
+}
+
+body[data-capture-mode="1"] .hud-card {
+  display: none;
+}
+
+body[data-capture-mode="1"] .app-shell::before {
+  display: none;
+}
+
+code {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.91rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  color: #f8e1ac;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.app-shell {
+  position: relative;
+  min-height: 100svh;
+  isolation: isolate;
+}
+
+.app-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 72% 22%, rgba(255, 220, 148, 0.12), transparent 24%),
+    linear-gradient(180deg, rgba(7, 11, 16, 0.04), rgba(7, 11, 16, 0.18)),
+    linear-gradient(95deg, rgba(7, 11, 16, 0.42), rgba(7, 11, 16, 0.12) 34%, transparent 62%);
+}
+
+.app-shell--error::before {
+  background:
+    linear-gradient(180deg, rgba(32, 12, 12, 0.36), rgba(10, 5, 5, 0.82)),
+    linear-gradient(95deg, rgba(10, 5, 5, 0.92), transparent 48%);
+}
+
+.render-canvas {
+  display: block;
+  width: 100%;
+  height: 100svh;
+  touch-action: none;
+}
+
+.hud-card {
+  position: absolute;
+  z-index: 2;
+  inset: 1rem auto auto 1rem;
+  width: min(31rem, calc(100% - 2rem));
+  padding: 1rem 1rem 1.1rem;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 1rem;
+  background: rgba(9, 17, 24, 0.56);
+  backdrop-filter: blur(18px);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.22);
+}
+
+.eyebrow {
+  margin: 0 0 0.45rem;
+  font-size: 0.76rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #8fd1d2;
+}
+
+.hud-card h1 {
+  margin: 0;
+  font-size: clamp(2.7rem, 7vw, 4.7rem);
+  line-height: 0.92;
+  letter-spacing: -0.05em;
+}
+
+.runtime-copy {
+  margin: 0.55rem 0 0;
+  color: #f6d7a2;
+}
+
+.lede {
+  max-width: 34ch;
+  margin: 0.8rem 0 0;
+  color: rgba(238, 243, 232, 0.82);
+}
+
+.diag {
+  margin: 0.95rem 0 0;
+  padding: 0.8rem 0.9rem;
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(238, 243, 232, 0.76);
+  font:
+    0.87rem/1.38 "SFMono-Regular",
+    Consolas,
+    monospace;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 720px) {
+  .hud-card {
+    inset: 0.75rem auto auto 0.75rem;
+    width: calc(100% - 1.5rem);
+    padding: 0.9rem;
+  }
+}
